@@ -1,11 +1,21 @@
 """Telegram API wrapper for sending and polling messages."""
 
 import asyncio
+import logging
 import re
+import sys
 from typing import Optional
 
 from telegram import Bot
 from telegram.error import TelegramError
+
+# Set up logging to stderr so it appears in MCP logs
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
 
 
 class TelegramClient:
@@ -47,12 +57,20 @@ class TelegramClient:
         """
         start_time = asyncio.get_event_loop().time()
         last_update_id = None
+        poll_count = 0
+
+        logger.info(f"Starting to poll for response to request_id: {request_id}")
+        logger.info(f"Timeout: {timeout}s, Poll interval: {poll_interval}s")
+        logger.info(f"Expecting messages from chat_id: {self.chat_id}")
 
         while True:
             # Check timeout
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed >= timeout:
+                logger.warning(f"Timeout reached after {elapsed:.1f}s, no response found")
                 return None
+
+            poll_count += 1
 
             try:
                 # Get updates from Telegram
@@ -61,24 +79,36 @@ class TelegramClient:
                     timeout=poll_interval,
                 )
 
+                if updates:
+                    logger.debug(f"Poll #{poll_count}: Received {len(updates)} update(s)")
+                else:
+                    logger.debug(f"Poll #{poll_count}: No new updates")
+
                 for update in updates:
                     last_update_id = update.update_id
 
                     # Check if update has a message from the correct chat
-                    if (
-                        update.message
-                        and update.message.chat_id == int(self.chat_id)
-                        and update.message.text
-                    ):
-                        # Try to extract response matching pattern: "request_id: <response>"
-                        response = self._extract_response(
-                            update.message.text, request_id
-                        )
-                        if response:
-                            return response
+                    if update.message and update.message.text:
+                        msg_chat_id = str(update.message.chat_id)
+                        msg_text = update.message.text
+
+                        logger.debug(f"Update {update.update_id}: chat_id={msg_chat_id}, text='{msg_text[:100]}'")
+
+                        if msg_chat_id == str(self.chat_id):
+                            logger.info(f"Message from correct chat! Text: '{msg_text}'")
+
+                            # Try to extract response matching pattern: "request_id: <response>"
+                            response = self._extract_response(msg_text, request_id)
+                            if response:
+                                logger.info(f"✓ Response extracted successfully: '{response}'")
+                                return response
+                            else:
+                                logger.warning(f"Message doesn't match pattern. Expected: '{request_id}: <response>'")
+                        else:
+                            logger.debug(f"Message from different chat (expected {self.chat_id}, got {msg_chat_id})")
 
             except TelegramError as e:
-                print(f"Error polling Telegram: {e}")
+                logger.error(f"Error polling Telegram: {e}")
                 # Wait before retrying
                 await asyncio.sleep(poll_interval)
                 continue

@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "claudegram": {
+      "command": "/Users/kaustubh/.local/bin/uv",
+      "args": [
+        "--directory",
+        "/Users/kaustubh/Documents/ClaudeGram",
+        "run",
+        "python",
+        "-m",
+        "telegram_io_mcp.server"
+      ],
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "7552477956:AAGizalD91y-SmhxmMSW2cci0p6PzLoTrO4",
+        "TELEGRAM_CHAT_ID": "8121817047"
+      }
+    }
+  }
+}
