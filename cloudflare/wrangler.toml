@@ -1,0 +1,28 @@
+name = "claudegram"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Durable Objects
+[durable_objects]
+bindings = [
+  { name = "USER_SESSIONS", class_name = "UserSession" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["UserSession"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "claudegram-db"
+database_id = "" # Will be filled after: wrangler d1 create claudegram-db
+
+# Environment variables (secrets set via: wrangler secret put)
+[vars]
+ENVIRONMENT = "production"
+
+# For development
+[env.dev]
+name = "claudegram-dev"
+vars = { ENVIRONMENT = "development" }

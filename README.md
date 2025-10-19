@@ -1,21 +1,60 @@
 # ClaudeGram - Telegram I/O MCP Server
 
-A lightweight MCP server that enables Claude Code to send prompts to Telegram and await responses, facilitating remote decision-making and input gathering while working on long-running tasks.
+A cloud-native MCP server that enables Claude Code to send prompts to Telegram and await responses across multiple devices, facilitating remote decision-making and input gathering while working on long-running tasks.
 
 ## Overview
 
-When Claude Code runs long-running development tasks, you may need to step away from your desktop. ClaudeGram bridges that gap by allowing Claude Code to send questions to your Telegram chat and wait for your responses on mobile.
+When Claude Code runs long-running development tasks, you may need to step away from your desktop or switch devices. ClaudeGram bridges that gap by:
+- Sending questions to your Telegram chat (respond on mobile)
+- OR responding directly in Claude chat (respond at desk)
+- Syncing state across all your devices via Cloudflare
 
 ## Features
 
-- **Send prompts to Telegram**: Claude Code can send questions/prompts to your Telegram chat
-- **Await responses**: Block until you respond or timeout is exceeded
-- **Request tracking**: SQLite database persists all requests and responses
-- **Non-blocking status checks**: Query request status without blocking
-- **Request history**: Retrieve past requests for debugging and audit
+- **Multi-device sync**: Use ClaudeGram across laptop, desktop, and mobile seamlessly
+- **Cloud-native**: Powered by Cloudflare Workers + Durable Objects + D1
+- **Dual-response**: Respond via Telegram OR Claude chat - whichever is convenient
+- **Real-time**: Instant updates via webhooks (no polling lag)
+- **Multi-message support**: Send multiple messages, system waits for silence
+- **Request tracking**: D1 database persists all requests and responses
 - **Automatic cleanup**: Remove old requests from the database
 
-## Quick Start
+## Architecture
+
+```
+Claude Code (Laptop) ──┐
+Claude Code (Desktop) ─┼──> Cloudflare Worker ──> Durable Object (per user)
+Claude Desktop        ─┘          │                     │
+                                  │                     ├─> D1 Database
+                                  │                     └─> Telegram Webhook
+                                  │
+                            Telegram Bot
+```
+
+**Key Components:**
+- **Local MCP Server** (on each device): Thin API client, communicates via stdio
+- **Cloudflare Worker**: Routes requests to user's Durable Object
+- **Durable Object**: One instance per user, manages all state and coordination
+- **D1 Database**: Cloud SQLite database for persistent storage
+- **Telegram Webhook**: Real-time message delivery (no polling!)
+
+## Deployment Modes
+
+ClaudeGram supports two deployment modes:
+
+### Local Mode (Simple, Single Device)
+- Local SQLite database
+- Direct Telegram polling
+- Good for: Single device, testing, offline use
+
+### Cloud Mode (Recommended, Multi-Device)
+- Cloudflare Workers + Durable Objects + D1
+- Telegram webhooks (real-time)
+- Good for: Multiple devices, production use, team collaboration
+
+This guide covers **Cloud Mode** deployment. For local mode, see [LOCAL_SETUP.md](./LOCAL_SETUP.md).
+
+## Cloud Deployment Guide
 
 ### 1. Create a Telegram Bot
 
@@ -25,28 +64,69 @@ When Claude Code runs long-running development tasks, you may need to step away 
 4. Get your user ID by chatting with [@userinfobot](https://t.me/userinfobot)
 5. Start a chat with your new bot by searching for it in Telegram
 
-### 2. Install ClaudeGram
+### 2. Deploy Cloudflare Backend
 
 ```bash
 git clone https://github.com/kbhalerao/claudegram.git
-cd claudegram
-uv sync
+cd claudegram/cloudflare
+
+# Install Wrangler (Cloudflare CLI)
+npm install -g wrangler
+
+# Login to Cloudflare
+wrangler login
+
+# Create D1 database
+wrangler d1 create claudegram-db
+
+# Deploy Worker + Durable Object
+wrangler deploy
 ```
 
-### 3. Configure Environment
+This creates:
+- Cloudflare Worker at `https://claudegram.<your-subdomain>.workers.dev`
+- D1 database for persistent storage
+- Durable Object class for user sessions
+
+### 3. Configure Telegram Webhook
+
+```bash
+# Set webhook to point to your Worker
+curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
+  -d "url=https://claudegram.<your-subdomain>.workers.dev/telegram/webhook"
+```
+
+### 4. Install MCP Server (on each device)
+
+```bash
+cd claudegram
+uv sync --extra dev
+```
+
+### 5. Configure Environment (on each device)
 
 ```bash
 cp .env.example .env
-# Edit .env with your bot token and chat ID
+# Edit .env with your settings
 ```
 
-Your `.env` file should look like:
+Your `.env` file should contain:
 ```
+# Cloudflare Worker URL
+CLOUDFLARE_WORKER_URL=https://claudegram.<your-subdomain>.workers.dev
+
+# API Key (get from Cloudflare dashboard or generate)
+CLOUDFLARE_API_KEY=your-secret-api-key
+
+# User ID (unique identifier for you)
+USER_ID=user-your-email@example.com
+
+# Telegram credentials (for Worker)
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_CHAT_ID=987654321
 ```
 
-### 4. Configure Claude Code
+### 6. Configure Claude Code (on each device)
 
 Add this MCP server to your Claude Desktop configuration file:
 
