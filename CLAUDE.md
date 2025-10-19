@@ -54,15 +54,22 @@ src/
 4. User replies on mobile: `request_id: <answer>`
 5. Extract response → Update SQLite → Return to Claude Code
 
-## MCP Tools to Implement
+## MCP Tools
 
 1. **send_request**: Send prompt to Telegram, returns request_id
-2. **await_response**: Block until response received (polls Telegram)
-3. **get_request_status**: Non-blocking status check
-4. **get_request_history**: Retrieve past requests for audit
-5. **clear_expired_requests**: Cleanup old database entries
+2. **await_response**: Block until response received (polls Telegram OR checks database for chat responses)
+3. **submit_response**: Submit response directly when user responds in Claude chat (NEW!)
+4. **get_request_status**: Non-blocking status check
+5. **get_request_history**: Retrieve past requests for audit
+6. **clear_expired_requests**: Cleanup old database entries
 
-See REQUIREMENTS.md lines 104-227 for detailed tool specifications.
+### Dual-Response Capability
+
+Users can respond either via:
+- **Telegram** (mobile/remote) - await_response polls for this
+- **Claude chat** (at desk) - Claude detects response and calls submit_response
+
+This provides maximum flexibility!
 
 ## Database Schema
 

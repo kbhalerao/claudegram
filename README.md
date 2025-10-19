@@ -86,25 +86,46 @@ After updating the configuration, restart Claude Desktop for the changes to take
 
 ## Usage
 
-### Basic Example
+### Dual-Response Workflow (Recommended)
 
-In Claude Code, you can now use the Telegram I/O tools:
+ClaudeGram supports responding from **either Telegram OR the Claude chat** - whichever is more convenient:
+
+**In Claude Chat:**
+```
+You: Use ClaudeGram to ask me which API style to use
+
+Claude: I've sent "Which API style should we use: REST or GraphQL?" to your
+        Telegram (@kdb_claudegram_bot). You can respond there, or just tell
+        me your answer here.
+
+You: Use GraphQL
+
+Claude: [calls submit_response] Got it! Proceeding with GraphQL...
+```
+
+**Or in Telegram:**
+```
+Telegram Bot: Which API style should we use: REST or GraphQL?
+You: GraphQL
+Claude: [polling detects response] Got it! Proceeding with GraphQL...
+```
+
+### Example Integration
 
 ```python
-# During a long-running task, send a question to your phone
-result = mcp.send_request(
-    "Should we refactor authentication into a separate service? (yes/no)"
-)
+# Claude sends the question
+result = send_request("Which API style should we use: REST or GraphQL?")
 request_id = result["request_id"]
 
-# Wait for your response (up to 5 minutes)
-response_data = mcp.await_response(request_id, timeout=300)
-decision = response_data["response"]
+# Claude tells you about both response options
+print(f"Question sent to Telegram. You can respond there, or tell me here.")
 
-# Continue based on your response
-if decision.lower() == "yes":
-    # proceed with refactoring
-    ...
+# If you respond in chat:
+# Claude detects your message and calls: submit_response(request_id, "GraphQL")
+
+# If you respond in Telegram:
+# Claude calls: await_response(request_id)
+# which polls Telegram and returns your response
 ```
 
 ### Responding on Telegram
@@ -187,6 +208,27 @@ Block until a response is received or timeout is exceeded.
   "response_time_seconds": 187
 }
 ```
+
+### `submit_response`
+
+Submit a response directly when the user responds in the Claude chat instead of Telegram.
+
+**Parameters**:
+- `request_id` (required): The request_id to respond to
+- `response` (required): The user's response text
+
+**Returns**:
+```json
+{
+  "request_id": "req_abc123xyz",
+  "response": "GraphQL",
+  "received_at": "2025-10-19T14:33:27Z",
+  "response_time_seconds": 72
+}
+```
+
+**Usage**:
+This tool allows Claude to submit responses on behalf of the user when they respond directly in the chat window instead of going to Telegram. This provides flexibility - respond from wherever is convenient!
 
 ### `get_request_status`
 

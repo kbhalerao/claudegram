@@ -87,6 +87,24 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="submit_response",
+            description="Submit a response directly (for when user responds in chat instead of Telegram)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "description": "The request_id to respond to",
+                    },
+                    "response": {
+                        "type": "string",
+                        "description": "The user's response text",
+                    },
+                },
+                "required": ["request_id", "response"],
+            },
+        ),
+        Tool(
             name="get_request_status",
             description="Check status of a request without blocking",
             inputSchema={
@@ -146,6 +164,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "await_response":
             result = await handle_await_response(arguments)
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "submit_response":
+            result = await handle_submit_response(arguments)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "get_request_status":
@@ -219,10 +241,22 @@ async def handle_await_response(arguments: dict) -> dict:
     if not request:
         raise ValueError(f"Request not found: {request_id}")
 
+    # Check if already completed (user may have submitted via chat)
+    if request.status == "completed" and request.response:
+        response_time = int((request.response_at - request.sent_at).total_seconds())
+        result = AwaitResponseResult(
+            request_id=request_id,
+            response=request.response,
+            received_at=request.response_at,
+            response_time_seconds=response_time,
+        )
+        return result.to_dict()
+
     # Use override timeout if provided, otherwise use original timeout
     timeout = arguments.get("timeout", request.timeout_seconds)
 
     # Poll for response (pass telegram_message_id for reply detection)
+    # This also checks database on each iteration for submit_response
     response_text = await telegram.poll_for_response(
         request_id=request_id,
         timeout=timeout,
@@ -234,6 +268,43 @@ async def handle_await_response(arguments: dict) -> dict:
         raise TimeoutError(
             f"Waited {timeout}s for response to {request_id}, no reply received"
         )
+
+    # Update database with response (if not already updated by submit_response)
+    request_updated = db.get_request(request_id)
+    if request_updated.status != "completed":
+        response_at = datetime.now()
+        db.update_response(request_id, response_text, response_at)
+    else:
+        response_at = request_updated.response_at
+        response_text = request_updated.response
+
+    # Calculate response time
+    response_time = int((response_at - request.sent_at).total_seconds())
+
+    # Return result
+    result = AwaitResponseResult(
+        request_id=request_id,
+        response=response_text,
+        received_at=response_at,
+        response_time_seconds=response_time,
+    )
+
+    return result.to_dict()
+
+
+async def handle_submit_response(arguments: dict) -> dict:
+    """Handle submit_response tool call - user responds directly in chat."""
+    request_id = arguments["request_id"]
+    response_text = arguments["response"]
+
+    # Get request from database
+    request = db.get_request(request_id)
+    if not request:
+        raise ValueError(f"Request not found: {request_id}")
+
+    # Check if already completed
+    if request.status == "completed":
+        raise ValueError(f"Request {request_id} already has a response: {request.response}")
 
     # Update database with response
     response_at = datetime.now()
