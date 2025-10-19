@@ -30,9 +30,17 @@ class DatabaseManager:
                     response TEXT,
                     response_at TIMESTAMP,
                     status TEXT DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    telegram_message_id INTEGER
                 )
             """)
+
+            # Migration: Add telegram_message_id column if it doesn't exist
+            cursor = conn.execute("PRAGMA table_info(requests)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "telegram_message_id" not in columns:
+                conn.execute("ALTER TABLE requests ADD COLUMN telegram_message_id INTEGER")
+
             conn.commit()
 
     def create_request(self, request: Request) -> None:
@@ -40,8 +48,8 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO requests (id, message, metadata, sent_at, timeout_seconds, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO requests (id, message, metadata, sent_at, timeout_seconds, status, created_at, telegram_message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.id,
@@ -51,6 +59,7 @@ class DatabaseManager:
                     request.timeout_seconds,
                     request.status,
                     datetime.now().isoformat(),
+                    request.telegram_message_id,
                 ),
             )
             conn.commit()
@@ -127,6 +136,28 @@ class DatabaseManager:
 
             return count, estimated_bytes
 
+    def get_request_by_telegram_message_id(self, telegram_message_id: int) -> Optional[Request]:
+        """Retrieve a request by Telegram message ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM requests WHERE telegram_message_id = ?", (telegram_message_id,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                return self._row_to_request(row)
+            return None
+
+    def update_telegram_message_id(self, request_id: str, telegram_message_id: int) -> None:
+        """Update a request with its Telegram message ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE requests SET telegram_message_id = ? WHERE id = ?",
+                (telegram_message_id, request_id),
+            )
+            conn.commit()
+
     @staticmethod
     def _row_to_request(row: sqlite3.Row) -> Request:
         """Convert a database row to a Request object."""
@@ -144,4 +175,5 @@ class DatabaseManager:
             created_at=datetime.fromisoformat(row["created_at"])
             if row["created_at"]
             else None,
+            telegram_message_id=row["telegram_message_id"] if "telegram_message_id" in row.keys() else None,
         )

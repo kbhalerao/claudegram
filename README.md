@@ -109,17 +109,45 @@ if decision.lower() == "yes":
 
 ### Responding on Telegram
 
-When you receive a message on Telegram like:
+ClaudeGram supports three ways to respond (from easiest to most explicit):
+
+**Method 1: Just send your answer** (Recommended)
+When you receive a question like:
 ```
-req_abc123xyz: Should we refactor authentication into a separate service? (yes/no)
+Should we refactor authentication into a separate service? (yes/no)
 ```
 
-Reply with:
+Just reply with:
+```
+yes
+```
+
+That's it! The system automatically associates your message with the pending request.
+
+**Method 2: Use Telegram's reply feature**
+Tap/click "Reply" on the bot's message and type your answer:
+```
+yes
+```
+
+This explicitly links your response to the specific question (useful if you have multiple pending requests).
+
+**Method 3: Prefix format** (Legacy)
+Include the request ID in your response:
 ```
 req_abc123xyz: yes
 ```
 
-The format is: `<request_id>: <your response>`
+This format is still supported for backward compatibility.
+
+**Multi-message responses:**
+You can send multiple messages! The system waits for 3 seconds of silence before finalizing your response. For example:
+```
+Message 1: Here are the pros
+Message 2: And here are the cons
+Message 3: I recommend option A
+```
+(wait 3 seconds → all messages combined and sent to Claude)
 
 ## MCP Tools
 

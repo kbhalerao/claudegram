@@ -18,6 +18,7 @@ class Request:
     response_at: Optional[datetime] = None
     status: str = "pending"
     created_at: Optional[datetime] = None
+    telegram_message_id: Optional[int] = None  # Telegram's message ID for reply matching
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

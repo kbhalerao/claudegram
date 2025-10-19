@@ -190,20 +190,20 @@ async def handle_send_request(arguments: dict) -> dict:
     # Store in database
     db.create_request(request)
 
-    # Format message with request_id prefix
-    telegram_message = f"{request_id}: {message}"
+    # Send to Telegram (just the message, no prefix needed!)
+    telegram_message_id = await telegram.send_message(message)
 
-    # Send to Telegram
-    success = await telegram.send_message(telegram_message)
-
-    if not success:
+    if not telegram_message_id:
         raise Exception("Failed to send message to Telegram")
+
+    # Update request with Telegram message ID
+    db.update_telegram_message_id(request_id, telegram_message_id)
 
     # Return result
     result = SendRequestResult(
         request_id=request_id,
         sent_at=request.sent_at,
-        telegram_message=telegram_message,
+        telegram_message=message,
     )
 
     return result.to_dict()
@@ -222,9 +222,12 @@ async def handle_await_response(arguments: dict) -> dict:
     # Use override timeout if provided, otherwise use original timeout
     timeout = arguments.get("timeout", request.timeout_seconds)
 
-    # Poll for response
+    # Poll for response (pass telegram_message_id for reply detection)
     response_text = await telegram.poll_for_response(
-        request_id=request_id, timeout=timeout, poll_interval=poll_interval
+        request_id=request_id,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        telegram_message_id=request.telegram_message_id
     )
 
     if response_text is None:
