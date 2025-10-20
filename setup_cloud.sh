@@ -249,7 +249,7 @@ echo "2. Add the following to your Claude Desktop config:"
 echo ""
 echo '{
   "mcpServers": {
-    "telegram-io": {
+    "claudegram": {
       "command": "uv",
       "args": [
         "--directory",

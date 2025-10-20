@@ -139,7 +139,7 @@ Add this MCP server to your Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "telegram-io": {
+    "claudegram": {
       "command": "uv",
       "args": [
         "--directory",
