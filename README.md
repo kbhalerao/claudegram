@@ -2,6 +2,48 @@
 
 A cloud-native MCP server that enables Claude Code to send prompts to Telegram and await responses across multiple devices, facilitating remote decision-making and input gathering while working on long-running tasks.
 
+## 🚀 Quickstart (5 minutes)
+
+**Want to respond to Claude from your phone while away from your desk?**
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/kbhalerao/claudegram.git
+cd claudegram
+uv sync
+
+# 2. Create Telegram bot (get token from @BotFather)
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+
+# 4. Install system-wide (works for both CLI and Desktop!)
+uv run python setup_claude_desktop.py
+
+# 5. Restart Claude Code/Desktop
+# Done! Use /away when you step away, /back when you return
+```
+
+**That's it!** Now when you use `/away`, Claude will send questions to your Telegram. Answer from your phone, and Claude continues working!
+
+---
+
+## 📚 Table of Contents
+
+- [🚀 Quickstart](#-quickstart-5-minutes) ← Start here!
+- [Overview](#overview)
+- [Features](#features)
+- [Cloud Deployment Guide](#cloud-deployment-guide) (optional, for multi-device)
+- [Usage](#usage)
+  - [Slash Commands](#slash-commands-quick-setup)
+  - [Dual-Response Workflow](#dual-response-workflow-recommended)
+- [MCP Tools](#mcp-tools)
+- [Troubleshooting](#troubleshooting) ← Common issues solved!
+- [Architecture](#architecture)
+- [Development](#development)
+
+---
+
 ## Overview
 
 When Claude Code runs long-running development tasks, you may need to step away from your desktop or switch devices. ClaudeGram bridges that gap by:
@@ -56,13 +98,34 @@ This guide covers **Cloud Mode** deployment. For local mode, see [LOCAL_SETUP.md
 
 ## Cloud Deployment Guide
 
-### 1. Create a Telegram Bot
+### 1. Create a Telegram Bot (2 minutes)
 
-1. Open Telegram and chat with [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` and follow the instructions to create a new bot
-3. Copy the bot token (you'll need this for configuration)
-4. Get your user ID by chatting with [@userinfobot](https://t.me/userinfobot)
-5. Start a chat with your new bot by searching for it in Telegram
+**Step-by-step with screenshots:**
+
+1. **Open Telegram** and search for `@BotFather` (official bot for creating bots)
+
+2. **Send this command:** `/newbot`
+
+3. **Follow the prompts:**
+   - Choose a name (e.g., "My ClaudeGram Bot")
+   - Choose a username ending in "bot" (e.g., "my_claudegram_bot")
+
+4. **Copy your bot token** - It looks like this:
+   ```
+   123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+   ```
+   ⚠️ **Keep this secret!** Don't share it publicly.
+
+5. **Get your Chat ID:**
+   - Search for `@userinfobot` in Telegram
+   - Send it any message
+   - It will reply with your user ID (e.g., `987654321`)
+
+6. **Start your bot:**
+   - Search for your bot in Telegram (the username you chose)
+   - Click "Start" or send `/start`
+
+✅ **You're done!** Save the bot token and chat ID for the next step.
 
 ### 2. Deploy Cloudflare Backend
 
@@ -105,36 +168,63 @@ uv sync --extra dev
 
 ### 5. Configure Environment (on each device)
 
+**Create your configuration file:**
+
 ```bash
 cp .env.example .env
-# Edit .env with your settings
 ```
 
-Your `.env` file should contain:
-```
-# Cloudflare Worker URL
-CLOUDFLARE_WORKER_URL=https://claudegram.<your-subdomain>.workers.dev
+**Edit `.env` with your values:**
 
-# API Key (get from Cloudflare dashboard or generate)
-CLOUDFLARE_API_KEY=your-secret-api-key
-
-# User ID (unique identifier for you)
-USER_ID=user-your-email@example.com
-
-# Telegram credentials (for Worker)
+```bash
+# Required: Your Telegram bot credentials from Step 1
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_CHAT_ID=987654321
+
+# Optional: For cloud mode (multi-device sync)
+CLOUDFLARE_WORKER_URL=https://claudegram.<your-subdomain>.workers.dev
+CLOUDFLARE_API_KEY=your-secret-api-key
+USER_ID=user-your-email@example.com
 ```
 
-### 6. Configure Claude Code (on each device)
+💡 **Tip:** You can use local mode first (just bot token + chat ID) and add cloud sync later!
 
-Add this MCP server to your Claude Desktop configuration file:
+### 6. Install System-Wide (One Command!)
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**This is the magic step that makes `/away` and `/back` work everywhere:**
 
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+```bash
+uv run python setup_claude_desktop.py
+```
 
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
+**What this does automatically:**
+
+✅ Installs `/away` and `/back` slash commands
+✅ Configures permissions (no permission prompts!)
+✅ Updates Claude Code CLI config (`~/.claude.json`)
+✅ Updates Claude Desktop config (platform-specific)
+✅ Creates backups of existing configs
+
+**You'll see output like:**
+```
+✓ Installed slash commands: away.md, back.md, README.md
+✓ Configured permissions: .claude/settings.local.json
+✓ Updated configuration file: ~/.claude.json
+Setup Complete!
+```
+
+**Now restart Claude Code/Desktop** and you're ready to go!
+
+**Manual Setup:**
+Add this MCP server to your configuration file:
+
+**Claude Desktop:**
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+**Claude Code (CLI):**
+- **All platforms**: `~/.claude.json`
 
 ```json
 {
@@ -160,11 +250,40 @@ Add this MCP server to your Claude Desktop configuration file:
 
 Replace `/absolute/path/to/claudegram` with the actual path to your cloned repository.
 
-### 5. Restart Claude Desktop
-
-After updating the configuration, restart Claude Desktop for the changes to take effect.
+**Note:** For Claude Code (CLI), you'll need to restart your Claude Code session for changes to take effect. For Claude Desktop, restart the application.
 
 ## Usage
+
+### Slash Commands (Quick Setup)
+
+ClaudeGram includes two convenient slash commands for toggling Telegram relay mode:
+
+**`/away` - Enable Telegram Relay**
+Use when stepping away from your desk. Claude will:
+- Send ALL questions to Telegram automatically
+- Wait for your mobile responses
+- Send progress updates to your phone
+
+**`/back` - Disable Telegram Relay**
+Use when returning to your desk. Claude will:
+- Resume normal CLI interaction
+- Stop using Telegram relay
+- Display full output in the terminal
+
+**Example workflow:**
+```bash
+# Stepping away from desk
+/away
+> Build the entire frontend and run all tests. Ask me about any decisions.
+
+# [You respond to questions from your phone via Telegram while away]
+
+# Back at desk
+/back
+> Show me the build output and test results
+```
+
+The slash commands are automatically installed when you run the setup script (`setup_claude_desktop.py`). All ClaudeGram MCP tools are pre-approved, so there are no permission prompts.
 
 ### Dual-Response Workflow (Recommended)
 
@@ -396,17 +515,129 @@ Mobile Device (user)
 
 ## Troubleshooting
 
-### "Request not found" error
-- Make sure you're using the correct request_id returned from `send_request`
+### 🔧 Setup Issues
 
-### "Timeout waiting for response" error
-- Check that you're replying in the correct format: `request_id: your response`
-- Increase the timeout value if you need more time
+**Slash commands `/away` and `/back` not working?**
 
-### "Failed to send message to Telegram" error
-- Verify your `TELEGRAM_BOT_TOKEN` is correct
-- Verify your `TELEGRAM_CHAT_ID` is correct
-- Make sure you've started a chat with your bot on Telegram
+1. **Check commands are installed:**
+   ```bash
+   ls .claude/commands/
+   # Should show: away.md, back.md, README.md
+   ```
+
+2. **Re-run setup if missing:**
+   ```bash
+   uv run python setup_claude_desktop.py
+   ```
+
+3. **Restart Claude:**
+   - Claude Code CLI: Exit and restart terminal session
+   - Claude Desktop: Quit app completely and reopen
+
+4. **Check config files exist:**
+   - CLI: `cat ~/.claude.json` (should have `mcpServers.claudegram`)
+   - Desktop: Check platform-specific config location
+
+**Permission prompts appearing?**
+
+Check `.claude/settings.local.json` has:
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__claudegram__send_request",
+      "mcp__claudegram__await_response",
+      ...
+    ]
+  }
+}
+```
+
+If missing, re-run: `uv run python setup_claude_desktop.py`
+
+**MCP server not starting?**
+
+1. **Check environment variables:**
+   ```bash
+   source .env  # or 'set -a; source .env; set +a' on Linux
+   echo $TELEGRAM_BOT_TOKEN  # Should show your token
+   ```
+
+2. **Test MCP server manually:**
+   ```bash
+   uv run python -m telegram_io_mcp.server
+   # Should start without errors
+   ```
+
+3. **Check logs:**
+   - Claude Code: Look for errors in terminal output
+   - Claude Desktop: Check Developer Tools console (Help → Toggle Developer Tools)
+
+### 📱 Telegram Issues
+
+**"Failed to send message to Telegram" error**
+
+1. **Verify credentials:**
+   ```bash
+   # Test bot token
+   curl https://api.telegram.org/bot<YOUR_TOKEN>/getMe
+   # Should return bot info
+   ```
+
+2. **Verify chat started:**
+   - Search for your bot in Telegram
+   - Make sure you sent `/start` to the bot
+
+3. **Check .env file:**
+   - `TELEGRAM_BOT_TOKEN` format: `123456789:ABCdef...`
+   - `TELEGRAM_CHAT_ID` format: `987654321` (just numbers)
+
+**Messages not being received?**
+
+- Check bot is online (search for it in Telegram)
+- Verify you're using the correct bot username
+- Try sending `/start` to the bot again
+
+**Can't find Chat ID?**
+
+Use `@userinfobot`:
+1. Search `@userinfobot` in Telegram
+2. Send any message
+3. Copy the ID it gives you
+
+### 🔄 Runtime Issues
+
+**"Request not found" error**
+
+- Make sure you're using the correct `request_id` returned from `send_request`
+- Check request hasn't expired (default 10 minutes)
+
+**"Timeout waiting for response" error**
+
+- Increase timeout: `send_request(message, timeout=600)`
+- Check you responded in Telegram (any message works!)
+- Try the request again
+
+**Responses not detected?**
+
+- Just send your answer as a normal message (no special format needed!)
+- Or use Telegram's "Reply" feature on the bot's message
+- Legacy format still works: `request_id: your answer`
+
+### 💻 Platform-Specific
+
+**macOS:** Config at `~/Library/Application Support/Claude/`
+**Windows:** Config at `%APPDATA%\Claude\`
+**Linux:** Config at `~/.config/Claude/`
+
+**Still having issues?**
+
+1. Check existing issues: https://github.com/kbhalerao/claudegram/issues
+2. Enable debug logging: Set `LOG_LEVEL=DEBUG` in `.env`
+3. Open a new issue with:
+   - Your OS and Claude version
+   - Output of `uv run python setup_claude_desktop.py`
+   - Any error messages from logs
 
 ## License
 
