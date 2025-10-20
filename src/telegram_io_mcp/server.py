@@ -5,7 +5,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -14,25 +14,41 @@ from mcp.types import Tool, TextContent
 from .database import DatabaseManager
 from .models import Request, SendRequestResult, AwaitResponseResult
 from .telegram_client import TelegramClient
+from .cloud_client import CloudClient, get_cloud_client
 
 # Load environment variables
 load_dotenv()
 
 # Configuration
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "local").lower()
 DEFAULT_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_DEFAULT", "300"))
-DATABASE_PATH = os.getenv("DATABASE_PATH", "./telegram_io_cache.db")
 
-# Validate configuration
-if not BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
-if not CHAT_ID:
-    raise ValueError("TELEGRAM_CHAT_ID environment variable is required")
+# Initialize components based on deployment mode
+db: Optional[DatabaseManager] = None
+telegram: Optional[TelegramClient] = None
+cloud: Optional[CloudClient] = None
 
-# Initialize components
-db = DatabaseManager(DATABASE_PATH)
-telegram = TelegramClient(BOT_TOKEN, CHAT_ID)
+if DEPLOYMENT_MODE == "cloud":
+    # Cloud mode: use Cloudflare Worker backend
+    cloud = get_cloud_client()
+    if not cloud:
+        raise ValueError(
+            "Cloud mode requires CLOUDFLARE_WORKER_URL, CLOUDFLARE_API_KEY, and USER_ID environment variables"
+        )
+else:
+    # Local mode: use local database and Telegram client
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    DATABASE_PATH = os.getenv("DATABASE_PATH", "./telegram_io_cache.db")
+
+    if not BOT_TOKEN:
+        raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required for local mode")
+    if not CHAT_ID:
+        raise ValueError("TELEGRAM_CHAT_ID environment variable is required for local mode")
+
+    db = DatabaseManager(DATABASE_PATH)
+    telegram = TelegramClient(BOT_TOKEN, CHAT_ID)
+
 app = Server("telegram-io-mcp")
 
 
@@ -196,39 +212,45 @@ async def handle_send_request(arguments: dict) -> dict:
     timeout = arguments.get("timeout", DEFAULT_TIMEOUT)
     metadata = arguments.get("metadata")
 
-    # Generate unique request ID
-    request_id = f"req_{uuid.uuid4().hex[:12]}"
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: use Cloudflare Worker API
+        result = await cloud.create_request(message, timeout, metadata)
+        return result.to_dict()
+    else:
+        # Local mode: use local database and Telegram client
+        # Generate unique request ID
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
 
-    # Create request object
-    request = Request(
-        id=request_id,
-        message=message,
-        sent_at=datetime.now(),
-        timeout_seconds=timeout,
-        metadata=metadata,
-        status="pending",
-    )
+        # Create request object
+        request = Request(
+            id=request_id,
+            message=message,
+            sent_at=datetime.now(),
+            timeout_seconds=timeout,
+            metadata=metadata,
+            status="pending",
+        )
 
-    # Store in database
-    db.create_request(request)
+        # Store in database
+        db.create_request(request)
 
-    # Send to Telegram (just the message, no prefix needed!)
-    telegram_message_id = await telegram.send_message(message)
+        # Send to Telegram (just the message, no prefix needed!)
+        telegram_message_id = await telegram.send_message(message)
 
-    if not telegram_message_id:
-        raise Exception("Failed to send message to Telegram")
+        if not telegram_message_id:
+            raise Exception("Failed to send message to Telegram")
 
-    # Update request with Telegram message ID
-    db.update_telegram_message_id(request_id, telegram_message_id)
+        # Update request with Telegram message ID
+        db.update_telegram_message_id(request_id, telegram_message_id)
 
-    # Return result
-    result = SendRequestResult(
-        request_id=request_id,
-        sent_at=request.sent_at,
-        telegram_message=message,
-    )
+        # Return result
+        result = SendRequestResult(
+            request_id=request_id,
+            sent_at=request.sent_at,
+            telegram_message=message,
+        )
 
-    return result.to_dict()
+        return result.to_dict()
 
 
 async def handle_await_response(arguments: dict) -> dict:
@@ -236,60 +258,94 @@ async def handle_await_response(arguments: dict) -> dict:
     request_id = arguments["request_id"]
     poll_interval = arguments.get("poll_interval", 2)
 
-    # Get request from database
-    request = db.get_request(request_id)
-    if not request:
-        raise ValueError(f"Request not found: {request_id}")
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: poll via Cloudflare Worker API
+        timeout = arguments.get("timeout", DEFAULT_TIMEOUT)
 
-    # Check if already completed (user may have submitted via chat)
-    if request.status == "completed" and request.response:
-        response_time = int((request.response_at - request.sent_at).total_seconds())
+        # Poll for response
+        start_time = datetime.now()
+        while True:
+            # Check request status
+            request = await cloud.get_request(request_id)
+            if not request:
+                raise ValueError(f"Request not found: {request_id}")
+
+            # Check if completed
+            if request.status == "completed" and request.response:
+                response_time = int((request.response_at - request.sent_at).total_seconds())
+                result = AwaitResponseResult(
+                    request_id=request_id,
+                    response=request.response,
+                    received_at=request.response_at,
+                    response_time_seconds=response_time,
+                )
+                return result.to_dict()
+
+            # Check timeout
+            elapsed = (datetime.now() - start_time).total_seconds()
+            if elapsed >= timeout:
+                raise TimeoutError(
+                    f"Waited {timeout}s for response to {request_id}, no reply received"
+                )
+
+            # Wait before next poll
+            await asyncio.sleep(poll_interval)
+    else:
+        # Local mode: use local database and Telegram client
+        # Get request from database
+        request = db.get_request(request_id)
+        if not request:
+            raise ValueError(f"Request not found: {request_id}")
+
+        # Check if already completed (user may have submitted via chat)
+        if request.status == "completed" and request.response:
+            response_time = int((request.response_at - request.sent_at).total_seconds())
+            result = AwaitResponseResult(
+                request_id=request_id,
+                response=request.response,
+                received_at=request.response_at,
+                response_time_seconds=response_time,
+            )
+            return result.to_dict()
+
+        # Use override timeout if provided, otherwise use original timeout
+        timeout = arguments.get("timeout", request.timeout_seconds)
+
+        # Poll for response (pass telegram_message_id for reply detection)
+        # This also checks database on each iteration for submit_response
+        response_text = await telegram.poll_for_response(
+            request_id=request_id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            telegram_message_id=request.telegram_message_id
+        )
+
+        if response_text is None:
+            raise TimeoutError(
+                f"Waited {timeout}s for response to {request_id}, no reply received"
+            )
+
+        # Update database with response (if not already updated by submit_response)
+        request_updated = db.get_request(request_id)
+        if request_updated.status != "completed":
+            response_at = datetime.now()
+            db.update_response(request_id, response_text, response_at)
+        else:
+            response_at = request_updated.response_at
+            response_text = request_updated.response
+
+        # Calculate response time
+        response_time = int((response_at - request.sent_at).total_seconds())
+
+        # Return result
         result = AwaitResponseResult(
             request_id=request_id,
-            response=request.response,
-            received_at=request.response_at,
+            response=response_text,
+            received_at=response_at,
             response_time_seconds=response_time,
         )
+
         return result.to_dict()
-
-    # Use override timeout if provided, otherwise use original timeout
-    timeout = arguments.get("timeout", request.timeout_seconds)
-
-    # Poll for response (pass telegram_message_id for reply detection)
-    # This also checks database on each iteration for submit_response
-    response_text = await telegram.poll_for_response(
-        request_id=request_id,
-        timeout=timeout,
-        poll_interval=poll_interval,
-        telegram_message_id=request.telegram_message_id
-    )
-
-    if response_text is None:
-        raise TimeoutError(
-            f"Waited {timeout}s for response to {request_id}, no reply received"
-        )
-
-    # Update database with response (if not already updated by submit_response)
-    request_updated = db.get_request(request_id)
-    if request_updated.status != "completed":
-        response_at = datetime.now()
-        db.update_response(request_id, response_text, response_at)
-    else:
-        response_at = request_updated.response_at
-        response_text = request_updated.response
-
-    # Calculate response time
-    response_time = int((response_at - request.sent_at).total_seconds())
-
-    # Return result
-    result = AwaitResponseResult(
-        request_id=request_id,
-        response=response_text,
-        received_at=response_at,
-        response_time_seconds=response_time,
-    )
-
-    return result.to_dict()
 
 
 async def handle_submit_response(arguments: dict) -> dict:
@@ -297,41 +353,53 @@ async def handle_submit_response(arguments: dict) -> dict:
     request_id = arguments["request_id"]
     response_text = arguments["response"]
 
-    # Get request from database
-    request = db.get_request(request_id)
-    if not request:
-        raise ValueError(f"Request not found: {request_id}")
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: submit via Cloudflare Worker API
+        result = await cloud.submit_response(request_id, response_text)
+        return result.to_dict()
+    else:
+        # Local mode: use local database
+        # Get request from database
+        request = db.get_request(request_id)
+        if not request:
+            raise ValueError(f"Request not found: {request_id}")
 
-    # Check if already completed
-    if request.status == "completed":
-        raise ValueError(f"Request {request_id} already has a response: {request.response}")
+        # Check if already completed
+        if request.status == "completed":
+            raise ValueError(f"Request {request_id} already has a response: {request.response}")
 
-    # Update database with response
-    response_at = datetime.now()
-    db.update_response(request_id, response_text, response_at)
+        # Update database with response
+        response_at = datetime.now()
+        db.update_response(request_id, response_text, response_at)
 
-    # Calculate response time
-    response_time = int((response_at - request.sent_at).total_seconds())
+        # Calculate response time
+        response_time = int((response_at - request.sent_at).total_seconds())
 
-    # Return result
-    result = AwaitResponseResult(
-        request_id=request_id,
-        response=response_text,
-        received_at=response_at,
-        response_time_seconds=response_time,
-    )
+        # Return result
+        result = AwaitResponseResult(
+            request_id=request_id,
+            response=response_text,
+            received_at=response_at,
+            response_time_seconds=response_time,
+        )
 
-    return result.to_dict()
+        return result.to_dict()
 
 
 async def handle_get_request_status(arguments: dict) -> dict:
     """Handle get_request_status tool call."""
     request_id = arguments["request_id"]
 
-    # Get request from database
-    request = db.get_request(request_id)
-    if not request:
-        raise ValueError(f"Request not found: {request_id}")
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: get via Cloudflare Worker API
+        request = await cloud.get_request(request_id)
+        if not request:
+            raise ValueError(f"Request not found: {request_id}")
+    else:
+        # Local mode: get from local database
+        request = db.get_request(request_id)
+        if not request:
+            raise ValueError(f"Request not found: {request_id}")
 
     # Return status
     return {
@@ -348,8 +416,12 @@ async def handle_get_request_history(arguments: dict) -> dict:
     limit = arguments.get("limit", 10)
     completed_only = arguments.get("completed_only", False)
 
-    # Get requests from database
-    requests = db.get_recent_requests(limit=limit, completed_only=completed_only)
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: get via Cloudflare Worker API
+        requests = await cloud.get_recent_requests(limit=limit, completed_only=completed_only)
+    else:
+        # Local mode: get from local database
+        requests = db.get_recent_requests(limit=limit, completed_only=completed_only)
 
     # Convert to dict format
     requests_data = []
@@ -367,8 +439,12 @@ async def handle_clear_expired_requests(arguments: dict) -> dict:
     """Handle clear_expired_requests tool call."""
     older_than_days = arguments.get("older_than_days", 7)
 
-    # Delete old requests
-    deleted_count, freed_space = db.delete_old_requests(older_than_days)
+    if DEPLOYMENT_MODE == "cloud":
+        # Cloud mode: delete via Cloudflare Worker API
+        deleted_count, freed_space = await cloud.delete_old_requests(older_than_days)
+    else:
+        # Local mode: delete from local database
+        deleted_count, freed_space = db.delete_old_requests(older_than_days)
 
     return {"deleted_count": deleted_count, "freed_space_bytes": freed_space}
 
